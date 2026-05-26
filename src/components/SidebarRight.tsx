@@ -20,6 +20,7 @@ interface SidebarRightProps {
   stopVideoRecording: () => void;
   exportFps: number;
   setExportFps: (fps: number) => void;
+  detectedAspect: string;
 }
 
 export const SidebarRight: React.FC<SidebarRightProps> = ({
@@ -38,7 +39,8 @@ export const SidebarRight: React.FC<SidebarRightProps> = ({
   recordingTime,
   stopVideoRecording,
   exportFps,
-  setExportFps
+  setExportFps,
+  detectedAspect
 }) => {
   const handleSliderChange = (key: keyof Settings, value: number | string | boolean) => {
     updateSettings({ [key]: value });
@@ -150,9 +152,49 @@ export const SidebarRight: React.FC<SidebarRightProps> = ({
             </div>
           </div>
 
+          {/* Output Aspect Ratio crop selector */}
+          <div>
+            {renderSectionHeader('2. Canvas Aspect Ratio')}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '4px' }}>
+                {(['original', '1:1', '16:9', '9:16', '4:3', '21:9'] as const).map((ratio) => (
+                  <button
+                    key={ratio}
+                    className={settings.aspectRatio === ratio ? 'active' : ''}
+                    onClick={() => handleSliderChange('aspectRatio', ratio)}
+                    style={{ 
+                      padding: '8px 2px', 
+                      fontSize: '10px', 
+                      borderRadius: '6px', 
+                      cursor: 'pointer',
+                      textTransform: 'uppercase',
+                      fontWeight: settings.aspectRatio === ratio ? 'bold' : 'normal'
+                    }}
+                  >
+                    {ratio}
+                  </button>
+                ))}
+              </div>
+              <div style={{ 
+                fontSize: '9px', 
+                color: 'var(--text-secondary)', 
+                display: 'flex', 
+                justifyContent: 'space-between',
+                padding: '4px 6px',
+                background: 'rgba(255, 255, 255, 0.03)',
+                borderRadius: '6px',
+                border: '1px solid rgba(255, 255, 255, 0.05)',
+                letterSpacing: '0.5px'
+              }}>
+                <span>DETECTED SOURCE:</span>
+                <span style={{ color: '#22d3ee', fontWeight: 'bold' }}>{detectedAspect}</span>
+              </div>
+            </div>
+          </div>
+
           {/* Dynamic Active Effect Parameters */}
           <div>
-            {renderSectionHeader('2. Filter Intensity')}
+            {renderSectionHeader('3. Filter Intensity')}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               {needsParameter('charset') && uiMode === 'custom' && (
                 <div className="slider-group">
@@ -366,7 +408,7 @@ export const SidebarRight: React.FC<SidebarRightProps> = ({
           {/* Custom Mode Color Mapping Controls */}
           {uiMode === 'custom' && (
             <div>
-              {renderSectionHeader('3. Brutalist Color Modes')}
+              {renderSectionHeader('4. Brutalist Color Modes')}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 <div className="toggle-group" style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '6px' }}>
                   <span style={{ fontSize: '10px', color: 'rgba(255, 255, 255, 0.5)' }}>COLOR MAP DESIGN</span>
@@ -459,7 +501,7 @@ export const SidebarRight: React.FC<SidebarRightProps> = ({
           {/* Chromatic CRT Artifacts - Advanced and Custom Modes Only */}
           {uiMode !== 'simple' && (
             <div>
-              {renderSectionHeader('4. Chromatic CRT Artifacts')}
+              {renderSectionHeader('5. Chromatic CRT Artifacts')}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 <div className="slider-group">
                   <div className="slider-label">
@@ -527,7 +569,7 @@ export const SidebarRight: React.FC<SidebarRightProps> = ({
           {/* Global Image Tuners - Advanced and Custom Modes Only */}
           {uiMode !== 'simple' && (
             <div>
-              {renderSectionHeader('5. Global Contrast & Light')}
+              {renderSectionHeader('6. Global Contrast & Light')}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 <div className="slider-group">
                   <div className="slider-label">
@@ -628,7 +670,7 @@ export const SidebarRight: React.FC<SidebarRightProps> = ({
           {/* 6. Export Studio */}
           {(originalImage || videoElement || webcamActive) && (
             <div>
-              {renderSectionHeader('6. Export Studio')}
+              {renderSectionHeader('7. Export Studio')}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
                   <button onClick={() => exportResult('png')} className="primary" style={{ padding: '8px', fontSize: '10.5px' }}>

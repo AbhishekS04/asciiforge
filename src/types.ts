@@ -98,6 +98,7 @@ export interface Settings {
   useCustomColumns?: boolean; // toggle for explicit width columns
   targetColumns?: number; // exact column width (e.g. 20 to 300)
   colorBoost?: number; // color vibrance / lightness boost (0 to 100)
+  aspectRatio?: 'original' | '16:9' | '9:16' | '1:1' | '4:3' | '21:9';
 }
 
 export interface Preset {

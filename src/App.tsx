@@ -148,7 +148,8 @@ const INITIAL_SETTINGS: Settings = {
   kuwaharaRadius: 4,
   useCustomColumns: false,
   targetColumns: 80,
-  colorBoost: 35
+  colorBoost: 35,
+  aspectRatio: 'original'
 };
 
 export default function App() {
@@ -164,6 +165,8 @@ export default function App() {
   const [zoom, setZoom] = useState(1.0);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [exportFps, setExportFps] = useState<number>(30);
+  const [detectedAspect, setDetectedAspect] = useState<string>('original');
+  const detectedAspectRef = useRef<string>('original');
 
   // Custom Presets State
   const [customPresets, setCustomPresets] = useState<Preset[]>([]);
@@ -306,6 +309,65 @@ export default function App() {
       // Standard viewport dimensions
       let sourceWidth = (source as any).videoWidth || (source as any).naturalWidth || source.width || 600;
       let sourceHeight = (source as any).videoHeight || (source as any).naturalHeight || source.height || 400;
+
+      // Auto-detect Aspect Ratio to display in the UI
+      if (sourceWidth && sourceHeight) {
+        const ratio = sourceWidth / sourceHeight;
+        let detected = 'original';
+        if (Math.abs(ratio - 16/9) < 0.05) detected = '16:9';
+        else if (Math.abs(ratio - 9/16) < 0.05) detected = '9:16';
+        else if (Math.abs(ratio - 1/1) < 0.05) detected = '1:1';
+        else if (Math.abs(ratio - 4/3) < 0.05) detected = '4:3';
+        else if (Math.abs(ratio - 21/9) < 0.05) detected = '21:9';
+        else {
+          detected = `${sourceWidth}:${sourceHeight}`;
+        }
+        if (detectedAspectRef.current !== detected) {
+          detectedAspectRef.current = detected;
+          setDetectedAspect(detected);
+        }
+      }
+
+      // Process custom Aspect Ratio cropping if requested
+      const selectedAspect = currentSettings.aspectRatio || 'original';
+      let finalSource: HTMLImageElement | HTMLVideoElement | HTMLCanvasElement = source;
+      if (selectedAspect !== 'original') {
+        let targetRatio = 1.0;
+        if (selectedAspect === '16:9') targetRatio = 16 / 9;
+        else if (selectedAspect === '9:16') targetRatio = 9 / 16;
+        else if (selectedAspect === '1:1') targetRatio = 1.0;
+        else if (selectedAspect === '4:3') targetRatio = 4 / 3;
+        else if (selectedAspect === '21:9') targetRatio = 21 / 9;
+
+        let sw = sourceWidth;
+        let sh = sourceHeight;
+        let sx = 0;
+        let sy = 0;
+
+        const currentRatio = sourceWidth / sourceHeight;
+        if (currentRatio > targetRatio) {
+          // Source is wider than target -> crop left/right
+          sw = sourceHeight * targetRatio;
+          sx = (sourceWidth - sw) / 2;
+        } else {
+          // Source is taller than target -> crop top/bottom
+          sh = sourceWidth / targetRatio;
+          sy = (sourceHeight - sh) / 2;
+        }
+
+        // Draw crop area onto an offscreen canvas
+        const cropCanvas = document.createElement('canvas');
+        cropCanvas.width = sw;
+        cropCanvas.height = sh;
+        const cropCtx = cropCanvas.getContext('2d');
+        if (cropCtx) {
+          cropCtx.drawImage(source, sx, sy, sw, sh, 0, 0, sw, sh);
+          finalSource = cropCanvas;
+          sourceWidth = sw;
+          sourceHeight = sh;
+        }
+      }
+      source = finalSource;
 
       // Resolution downscaling
       const renderWidth = Math.floor(sourceWidth * currentSettings.resolutionScale);
@@ -1543,9 +1605,12 @@ ${bodyContent}
 
       if (isVideoFile) {
         const runAutomaticRender = async () => {
+          let originalLoop = false;
           try {
             const wasPaused = videoElement.paused;
             const originalTime = videoElement.currentTime;
+            originalLoop = videoElement.loop;
+            videoElement.loop = false;
             
             // Go to beginning
             videoElement.currentTime = 0;
@@ -1622,6 +1687,7 @@ ${bodyContent}
               setRenderingVideoProgress(null);
               renderingVideoProgressRef.current = null;
               videoElement.currentTime = originalTime;
+              videoElement.loop = originalLoop;
               if (wasPaused) {
                 videoElement.pause();
               } else {
@@ -1671,6 +1737,7 @@ ${bodyContent}
             alert('An error occurred during video rendering.');
             setRenderingVideoProgress(null);
             renderingVideoProgressRef.current = null;
+            videoElement.loop = originalLoop;
           }
         };
 
@@ -1857,6 +1924,7 @@ ${bodyContent}
           stopVideoRecording={stopVideoRecording}
           exportFps={exportFps}
           setExportFps={setExportFps}
+          detectedAspect={detectedAspect}
         />
       </div>
 

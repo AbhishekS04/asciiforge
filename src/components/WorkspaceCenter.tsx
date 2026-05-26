@@ -231,14 +231,18 @@ export const WorkspaceCenter: React.FC<WorkspaceCenterProps> = ({
       {originalImage || videoElement || webcamActive ? (
         <div
           style={{
-            transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+            position: 'absolute',
+            left: '50%',
+            top: '50%',
+            transform: `translate(calc(-50% + ${pan.x}px), calc(-50% + ${pan.y}px)) scale(${zoom})`,
+            transformOrigin: 'center center',
             transition: isDraggingPan ? 'none' : 'transform 0.1s ease',
-            position: 'relative',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             cursor: isDraggingPan ? 'grabbing' : 'grab',
-            userSelect: 'none'
+            userSelect: 'none',
+            zIndex: 2
           }}
         >
           {/* Processed canvas viewport (Native Canvas Comparison handles split) */}
