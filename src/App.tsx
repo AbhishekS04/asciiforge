@@ -791,22 +791,45 @@ export default function App() {
   // Video / Webcam Playback Rendering Loop
   useEffect(() => {
     let animationFrameId: number;
+    let active = true;
 
-    const loop = () => {
-      if ((webcamActive || (videoElement && !videoElement.paused) || renderingVideoProgressRef.current?.active) && !isExportingRef.current) {
-        render();
-        animationFrameId = requestAnimationFrame(loop);
+    const loop = async () => {
+      if (!active) return;
+
+      const isPlaying = webcamActive || (videoElement && !videoElement.paused) || renderingVideoProgressRef.current?.active;
+
+      if (isPlaying && !isExportingRef.current) {
+        try {
+          await render();
+        } catch (err) {
+          console.error('Frame loop error:', err);
+        }
+        if (active) {
+          animationFrameId = requestAnimationFrame(loop);
+        }
       }
     };
 
-    if ((webcamActive || (videoElement && !videoElement.paused) || renderingVideoProgressRef.current?.active) && !isExportingRef.current) {
+    const isPlaying = webcamActive || (videoElement && !videoElement.paused) || renderingVideoProgressRef.current?.active;
+
+    if (isPlaying && !isExportingRef.current) {
       animationFrameId = requestAnimationFrame(loop);
-    } else if (!isExportingRef.current) {
-      render(); // Static image render once on settings change or comparison adjustment
     }
 
-    return () => cancelAnimationFrame(animationFrameId);
-  }, [webcamActive, activeEffect, settings, originalImage, videoElement, compareMode, compareOffset, render]);
+    return () => {
+      active = false;
+      cancelAnimationFrame(animationFrameId);
+    };
+  }, [webcamActive, videoElement, render]);
+
+  // Static render once on settings change or comparison adjustment when paused
+  useEffect(() => {
+    const isPlaying = webcamActive || (videoElement && !videoElement.paused) || renderingVideoProgressRef.current?.active;
+    if (!isPlaying && !isExportingRef.current) {
+      render();
+    }
+  }, [settings, activeEffect, compareMode, compareOffset, webcamActive, videoElement, render]);
+
 
   // Undo/Redo tracking
   const pushHistory = (newSettings: Settings, newEffect: EffectId) => {

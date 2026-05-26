@@ -489,16 +489,139 @@ export class WebGLProcessor {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
   }
 
+  private preprocessFragmentShader(src: string): string {
+    const hasLocalBrightness = src.includes('uniform float u_brightness;');
+    const hasLocalTime = src.includes('uniform float u_time;');
+    const hasLocalResolution = src.includes('uniform vec2 u_resolution;');
+
+    // 1. Injected Uniforms & Helpers
+    let injection = '\n' +
+'// Dynamically injected global uniforms & helpers\n' +
+'uniform float u_gamma;\n' +
+'uniform float u_sharpen;\n' +
+'uniform int u_invert;\n' +
+'uniform int u_grayscale;\n' +
+'uniform int u_colorMode;\n' +
+'uniform vec3 u_monoFg;\n' +
+'uniform vec3 u_monoBg;\n' +
+'uniform vec3 u_gradStart;\n' +
+'uniform vec3 u_gradEnd;\n' +
+'uniform float u_chromatic;\n' +
+'uniform float u_scanlines;\n' +
+'uniform float u_grain;\n' +
+'uniform float u_vignette;\n\n';
+
+    if (!hasLocalBrightness) {
+      injection += 'uniform float u_brightness;\nuniform float u_contrast;\n\n';
+    }
+    if (!hasLocalTime) {
+      injection += 'uniform float u_time;\n';
+    }
+    if (!hasLocalResolution) {
+      injection += 'uniform vec2 u_resolution;\n';
+    }
+
+
+    injection += 
+'#ifndef RANDOM_HELPER_DEFINED\n' +
+'#define RANDOM_HELPER_DEFINED\n' +
+'float rand_injected(vec2 co) {\n' +
+'  return fract(sin(dot(co, vec2(12.9898, 78.233))) * 43758.5453);\n' +
+'}\n' +
+'#endif\n\n' +
+'vec3 applyColorGradingInjected(vec3 color) {\n';
+
+    if (!hasLocalBrightness) {
+      injection += 
+'  // Brightness\n' +
+'  color += u_brightness;\n' +
+'  // Contrast\n' +
+'  color = (color - 0.5) * (1.0 + u_contrast) + 0.5;\n';
+    }
+
+    injection += 
+'  // Gamma\n' +
+'  color = pow(max(color, vec3(0.0)), vec3(1.0 / u_gamma));\n' +
+'  // Grayscale\n' +
+'  if (u_grayscale == 1) {\n' +
+'    float luma = dot(color, vec3(0.299, 0.587, 0.114));\n' +
+'    color = vec3(luma);\n' +
+'  }\n' +
+'  // Invert\n' +
+'  if (u_invert == 1) {\n' +
+'    color = 1.0 - color;\n' +
+'  }\n' +
+'  return clamp(color, 0.0, 1.0);\n' +
+'}\n\n' +
+'vec3 applyColorModeInjected(vec3 color) {\n' +
+'  float luma = dot(color, vec3(0.299, 0.587, 0.114));\n' +
+'  if (u_colorMode == 1) { // Mono\n' +
+'    return mix(u_monoBg, u_monoFg, luma);\n' +
+'  } else if (u_colorMode == 2) { // Gradient Map\n' +
+'    return mix(u_gradStart, u_gradEnd, luma);\n' +
+'  }\n' +
+'  return color;\n' +
+'}\n';
+
+    // Insert injection right after "precision highp float;" or similar
+    let processed = src;
+    const insertIndex = processed.indexOf('precision highp float;');
+    if (insertIndex !== -1) {
+      const endOfLine = processed.indexOf('\n', insertIndex);
+      processed = processed.slice(0, endOfLine + 1) + injection + processed.slice(endOfLine + 1);
+    }
+
+    // Replace the final fragColor = vec4(..., ...);
+    const fragColorRegex = /fragColor\s*=\s*vec4\(([^,]+),\s*([^)]+)\);/g;
+    processed = processed.replace(fragColorRegex, (match, colorExpr, alphaExpr) => {
+      const cleanColorExpr = colorExpr.trim();
+      return '\n' +
+'  {\n' +
+'    vec3 tempColor = ' + cleanColorExpr + ';\n' +
+'    tempColor = applyColorGradingInjected(tempColor);\n' +
+'    tempColor = applyColorModeInjected(tempColor);\n' +
+'    \n' +
+'    // Apply scanlines\n' +
+'    if (u_scanlines > 0.0) {\n' +
+'      float scanline = sin(v_texCoord.y * u_resolution.y * 3.14159) * 0.5 + 0.5;\n' +
+'      tempColor = mix(tempColor, tempColor * (1.0 - u_scanlines * 0.4), scanline);\n' +
+'    }\n' +
+'\n' +
+'    // Apply Film Grain\n' +
+'    if (u_grain > 0.0) {\n' +
+'      float noise = rand_injected(v_texCoord + fract(u_time));\n' +
+'      tempColor = mix(tempColor, tempColor + (noise - 0.5) * 0.25, u_grain);\n' +
+'    }\n' +
+'\n' +
+'    // Apply Vignette\n' +
+'    if (u_vignette > 0.0) {\n' +
+'      vec2 distVec = v_texCoord - 0.5;\n' +
+'      float dist = dot(distVec, distVec);\n' +
+'      tempColor *= clamp(1.0 - dist * u_vignette, 0.0, 1.0);\n' +
+'    }\n' +
+'\n' +
+'    fragColor = vec4(tempColor, ' + alphaExpr.trim() + ');\n' +
+'  }\n';
+    });
+
+    return processed;
+  }
+
+
   private getOrCreateProgram(effectId: string): WebGLProgram {
     if (this.programMap.has(effectId)) {
       return this.programMap.get(effectId)!;
     }
 
-    const fsSrc = SHADER_EFFECTS[effectId] || SHADER_EFFECTS['base'];
+    let fsSrc = SHADER_EFFECTS[effectId] || SHADER_EFFECTS['base'];
+    if (effectId !== 'base') {
+      fsSrc = this.preprocessFragmentShader(fsSrc);
+    }
     const program = createProgram(this.gl, VERTEX_SHADER_SRC, fsSrc);
     this.programMap.set(effectId, program);
     return program;
   }
+
 
   public process(
     source: HTMLImageElement | HTMLVideoElement | HTMLCanvasElement,
