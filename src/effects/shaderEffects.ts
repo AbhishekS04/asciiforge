@@ -573,7 +573,7 @@ export class WebGLProcessor {
 
     // Replace the final fragColor = vec4(..., ...);
     const fragColorRegex = /fragColor\s*=\s*vec4\(([^,]+),\s*([^)]+)\);/g;
-    processed = processed.replace(fragColorRegex, (match, colorExpr, alphaExpr) => {
+    processed = processed.replace(fragColorRegex, (_match, colorExpr, alphaExpr) => {
       const cleanColorExpr = colorExpr.trim();
       return '\n' +
 '  {\n' +
@@ -628,7 +628,7 @@ export class WebGLProcessor {
     settings: Settings,
     effectId: string,
     time: number,
-    isExportingOrRecording: boolean = false
+    _isExportingOrRecording: boolean = false
   ): HTMLCanvasElement {
     const gl = this.gl;
     
@@ -667,16 +667,14 @@ export class WebGLProcessor {
     const uTime = gl.getUniformLocation(program, 'u_time');
     gl.uniform1f(uTime, time);
 
-    // Set Global sliders with export dynamic range compensation
-    const contrastComp = isExportingOrRecording ? 1.15 : 1.0;
-    const brightnessComp = isExportingOrRecording ? 0.04 : 0.0;
-    const activeGamma = isExportingOrRecording ? (settings.gamma || 1.0) * 0.90 : (settings.gamma || 1.0);
+    // Set Global sliders matching the settings exactly
+    const activeGamma = settings.gamma || 1.0;
 
     const uBrightness = gl.getUniformLocation(program, 'u_brightness');
-    if (uBrightness) gl.uniform1f(uBrightness, (settings.brightness / 100) + brightnessComp);
+    if (uBrightness) gl.uniform1f(uBrightness, settings.brightness / 100);
 
     const uContrast = gl.getUniformLocation(program, 'u_contrast');
-    if (uContrast) gl.uniform1f(uContrast, (settings.contrast / 100) * contrastComp);
+    if (uContrast) gl.uniform1f(uContrast, settings.contrast / 100);
 
     const uGamma = gl.getUniformLocation(program, 'u_gamma');
     if (uGamma) gl.uniform1f(uGamma, activeGamma);

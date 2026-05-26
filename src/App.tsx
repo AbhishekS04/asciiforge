@@ -430,6 +430,8 @@ export default function App() {
             performance.now() / 1000,
             isExportingRef.current || recording
           );
+          ctx.fillStyle = '#000000';
+          ctx.fillRect(0, 0, renderWidth, renderHeight);
           ctx.drawImage(offscreenWebGL, 0, 0);
           drawComparisonSplit(ctx);
           resolve();
@@ -478,14 +480,11 @@ export default function App() {
           const imgData = tempCtx.getImageData(0, 0, cols, srcH);
           const pixels = imgData.data;
 
-          // Apply brightness/contrast/gamma pre-adjustments off-screen with video export dynamic range compensation
           const isCompensated = isExportingRef.current || recording;
-          const exportContrastComp = isCompensated ? 1.15 : 1.0;
-          const exportBrightnessComp = isCompensated ? 10.0 : 0.0;
-          
-          const brightness = (currentSettings.brightness / 100 * 255) + exportBrightnessComp;
-          const contrast = (1.0 + (currentSettings.contrast / 100)) * exportContrastComp;
-          const gamma = isCompensated ? (currentSettings.gamma || 1.0) * 0.90 : (currentSettings.gamma || 1.0);
+          // Apply brightness/contrast/gamma pre-adjustments off-screen matching live preview exactly
+          const brightness = (currentSettings.brightness / 100 * 255);
+          const contrast = (1.0 + (currentSettings.contrast / 100));
+          const gamma = currentSettings.gamma || 1.0;
           const invGamma = 1.0 / gamma;
           
           for (let i = 0; i < pixels.length; i += 4) {
@@ -959,7 +958,8 @@ export default function App() {
     const video = document.createElement('video');
     video.src = URL.createObjectURL(file);
     video.autoplay = true;
-    video.muted = true;
+    video.muted = false;
+    video.volume = 1.0;
     video.loop = settings.loop;
     video.playsInline = true;
     video.addEventListener('loadedmetadata', () => {
@@ -1657,10 +1657,11 @@ ${bodyContent}
 
             // Capture the audio track from the video element playback using browser capabilities
             let combinedStream = stream;
+            let audioTrack: MediaStreamTrack | null = null;
             try {
               const videoStream = (videoElement as any).captureStream ? (videoElement as any).captureStream() : (videoElement as any).mozCaptureStream ? (videoElement as any).mozCaptureStream() : null;
               if (videoStream) {
-                const audioTrack = videoStream.getAudioTracks()[0];
+                audioTrack = videoStream.getAudioTracks()[0] || null;
                 if (audioTrack) {
                   combinedStream = new MediaStream([
                     ...stream.getVideoTracks(),
@@ -1693,7 +1694,26 @@ ${bodyContent}
               if (e.data && e.data.size > 0) chunks.push(e.data);
             };
 
+            let active = true;
+            let callbackId: any = null;
+
+            const originalMuted = videoElement.muted;
+            const originalVolume = videoElement.volume;
+
             recorder.onstop = () => {
+              active = false;
+              if (callbackId) {
+                if ((videoElement as any).cancelVideoFrameCallback) {
+                  (videoElement as any).cancelVideoFrameCallback(callbackId);
+                } else {
+                  cancelAnimationFrame(callbackId);
+                }
+              }
+
+              // Restore original muted and volume states
+              videoElement.muted = originalMuted;
+              videoElement.volume = originalVolume;
+
               const blob = new Blob(chunks, { type: options.mimeType });
               const url = URL.createObjectURL(blob);
               const a = document.createElement('a');
@@ -1725,35 +1745,108 @@ ${bodyContent}
             setRenderingVideoProgress(progressState);
             renderingVideoProgressRef.current = progressState;
 
-            recorder.start();
-            videoElement.play();
+            if (audioTrack) {
+              // Path A: Video contains an audio track -> Record unmuted in real-time with frame synchronization
+              videoElement.muted = false;
+              videoElement.volume = 1.0;
+              videoElement.currentTime = 0;
 
-            // Background-safe rendering loop — tracks ACTUAL frames rendered
-            let renderedFrameCount = 0;
-            const exportInterval = setInterval(() => {
-              render();
-              renderedFrameCount++;
+              recorder.start();
+              videoElement.play();
 
-              const current = videoElement.currentTime;
-              const currentFrameNum = Math.min(totalFrames, Math.ceil(current * fps));
-              const progressState = {
-                active: true,
-                currentFrame: currentFrameNum,
-                totalFrames,
-                renderedFrames: renderedFrameCount,
-                currentTime: current,
-                duration
+              const updateFrame = async () => {
+                if (!active) return;
+                try {
+                  await render();
+                } catch (e) {
+                  console.warn('Real-time frame capture error:', e);
+                }
+
+                const current = videoElement.currentTime;
+                const currentFrameNum = Math.min(totalFrames, Math.ceil(current * fps));
+                const progressState = {
+                  active: true,
+                  currentFrame: currentFrameNum,
+                  totalFrames,
+                  renderedFrames: currentFrameNum,
+                  currentTime: current,
+                  duration
+                };
+                setRenderingVideoProgress(progressState);
+                renderingVideoProgressRef.current = progressState;
+
+                if (videoElement.ended || current >= duration) {
+                  active = false;
+                  recorder.stop();
+                  videoElement.pause();
+                  return;
+                }
+
+                if ((videoElement as any).requestVideoFrameCallback) {
+                  callbackId = (videoElement as any).requestVideoFrameCallback(updateFrame);
+                } else {
+                  callbackId = requestAnimationFrame(updateFrame);
+                }
               };
-              setRenderingVideoProgress(progressState);
-              renderingVideoProgressRef.current = progressState;
 
-              if (videoElement.ended || current >= duration) {
-                clearInterval(exportInterval);
-                isExportingRef.current = false;
-                videoElement.pause();
-                recorder.stop();
+              if ((videoElement as any).requestVideoFrameCallback) {
+                callbackId = (videoElement as any).requestVideoFrameCallback(updateFrame);
+              } else {
+                callbackId = requestAnimationFrame(updateFrame);
               }
-            }, 1000 / fps);
+            } else {
+              // Path B: Silent video -> Fast, deterministic offline seek-and-render
+              recorder.start();
+              let frameIndex = 0;
+              const processNextFrame = async () => {
+                if (!isExportingRef.current) {
+                  try {
+                    if (recorder.state !== 'inactive') recorder.stop();
+                  } catch (_) {}
+                  return;
+                }
+
+                if (frameIndex >= totalFrames) {
+                  recorder.stop();
+                  return;
+                }
+
+                const targetTime = frameIndex * (1.0 / fps);
+                videoElement.currentTime = Math.min(targetTime, duration);
+
+                await new Promise<void>((resolveSeek) => {
+                  const onSeeked = () => {
+                    videoElement.removeEventListener('seeked', onSeeked);
+                    resolveSeek();
+                  };
+                  videoElement.addEventListener('seeked', onSeeked);
+                });
+
+                await new Promise((r) => setTimeout(r, 45));
+
+                try {
+                  await render();
+                } catch (renderErr) {
+                  console.warn('Frame render skipped:', renderErr);
+                }
+
+                frameIndex++;
+                const progressState = {
+                  active: true,
+                  currentFrame: frameIndex,
+                  totalFrames,
+                  renderedFrames: frameIndex,
+                  currentTime: targetTime,
+                  duration
+                };
+                setRenderingVideoProgress(progressState);
+                renderingVideoProgressRef.current = progressState;
+
+                setTimeout(processNextFrame, 0);
+              };
+
+              processNextFrame();
+            }
 
           } catch (err) {
             console.error('Automatic render failed', err);
